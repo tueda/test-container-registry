@@ -1,0 +1,10 @@
+{
+  "allowCompoundWords": true,
+  "dictionaries": [
+    "bash",
+    "docker"
+  ],
+  "language": "en",
+  "version": "0.2",
+  "words": []
+}
