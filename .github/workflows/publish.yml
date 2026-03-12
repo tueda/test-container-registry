@@ -13,7 +13,8 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  KEEP_UNTAGGED_COUNT: 3
+  KEEP_UNTAGGED_COUNT_MAIN: 12
+  KEEP_UNTAGGED_COUNT_OTHER: 6
 
 jobs:
   build:
@@ -158,19 +159,38 @@ jobs:
             const packageName = '${{ steps.vars.outputs.package_name }}';
             const refType = context.ref?.startsWith("refs/tags/") ? "tag" : "branch";
             const refName = context.ref?.replace("refs/heads/", "").replace("refs/tags/", "") || "";
-            const defaultKeep = Number(process.env.KEEP_UNTAGGED_COUNT || "3");
+            const mainKeep = Number(process.env.KEEP_UNTAGGED_COUNT_MAIN || "3");
+            const otherKeep = Number(process.env.KEEP_UNTAGGED_COUNT_OTHER || "1");
             const ownerType = context.payload.repository.owner.type;
+
+            const toLine = (v) => {
+              const tags = (v.metadata?.container?.tags || []).join(",") || "<untagged>";
+              const created = v.created_at || "";
+              const updated = v.updated_at || "";
+              return `id=${v.id} tags=[${tags}] created=${created} updated=${updated}`;
+            };
+
+            const dumpList = (title, items) => {
+              core.info(`${title} (${items.length})`);
+              if (items.length === 0) {
+                core.info("  - <none>");
+                return;
+              }
+              for (const v of items) {
+                core.info(`  - ${toLine(v)}`);
+              }
+            };
 
             // Policy:
             // - tags: keep all
-            // - main: keep KEEP_UNTAGGED_COUNT
-            // - other branches: keep 1
+            // - main: keep KEEP_UNTAGGED_COUNT_MAIN
+            // - other branches: keep KEEP_UNTAGGED_COUNT_OTHER
             if (refType === "tag") {
               core.info(`Tag run (${refName}): skip untagged cleanup.`);
               return;
             }
 
-            const keepUntagged = refName === "main" ? defaultKeep : 1;
+            const keepUntagged = refName === "main" ? mainKeep : otherKeep;
 
             const listEndpoint = ownerType === "Organization"
               ? "GET /orgs/{org}/packages/{package_type}/{package_name}/versions"
@@ -185,15 +205,31 @@ jobs:
               : { username: owner, package_type: "container", package_name: packageName, per_page: 100 };
 
             const versions = await github.paginate(listEndpoint, listParams);
-            const untagged = versions
+            const sortedVersions = [...versions].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            const tagged = sortedVersions.filter((v) => {
+              const tags = v.metadata?.container?.tags || [];
+              return tags.length > 0;
+            });
+            const untagged = sortedVersions
               .filter((v) => {
                 const tags = v.metadata?.container?.tags || [];
                 return tags.length === 0;
               })
               .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+            dumpList("All container versions", sortedVersions);
+            dumpList("Tagged versions (always kept)", tagged);
+            dumpList("Untagged versions", untagged);
+
             const toDelete = untagged.slice(keepUntagged);
+            const keptUntagged = untagged.slice(0, keepUntagged);
+            const deleteIds = new Set(toDelete.map((v) => v.id));
+            const remainingAfterCleanup = sortedVersions.filter((v) => !deleteIds.has(v.id));
+
             core.info(`Branch run (${refName}): found ${untagged.length} untagged versions; keeping ${keepUntagged}, deleting ${toDelete.length}.`);
+            dumpList("Will delete", toDelete);
+            dumpList("Will keep (untagged)", keptUntagged);
+            dumpList("Will remain after cleanup", remainingAfterCleanup);
 
             for (const v of toDelete) {
               const deleteParams = ownerType === "Organization"
