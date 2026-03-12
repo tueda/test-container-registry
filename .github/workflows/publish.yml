@@ -107,17 +107,21 @@ jobs:
       - name: Create manifest and tags
         run: |
           image='${{ steps.vars.outputs.image }}'
+          sources=()
+          for digest in *; do
+            sources+=("$image@sha256:$digest")
+          done
           if [[ '${{ github.ref_type }}' == 'tag' ]]; then
             version='${{ github.ref_name }}'
             docker buildx imagetools create \
               -t "$image:$version" \
               -t "$image:latest" \
-              "$(printf '%s@sha256:%s ' "$image" *)"
+              "${sources[@]}"
           else
             branch='${{ github.ref_name }}'
             docker buildx imagetools create \
               -t "$image:$branch" \
-              "$(printf '%s@sha256:%s ' "$image" *)"
+              "${sources[@]}"
           fi
         working-directory: ${{ runner.temp }}/digests
 
