@@ -106,23 +106,37 @@ jobs:
 
       - name: Create manifest and tags
         run: |
+          set -euo pipefail
+          shopt -s nullglob
+
           image='${{ steps.vars.outputs.image }}'
           sources=()
           for digest in *; do
             sources+=("$image@sha256:$digest")
           done
+
+          if [[ ${#sources[@]} -eq 0 ]]; then
+            echo "No digest files found in $(pwd)"
+            ls -la
+            exit 1
+          fi
+
           if [[ '${{ github.ref_type }}' == 'tag' ]]; then
             version='${{ github.ref_name }}'
+            target_tag="$version"
             docker buildx imagetools create \
               -t "$image:$version" \
               -t "$image:latest" \
               "${sources[@]}"
           else
             branch='${{ github.ref_name }}'
+            target_tag="$branch"
             docker buildx imagetools create \
               -t "$image:$branch" \
               "${sources[@]}"
           fi
+
+          docker buildx imagetools inspect "$image:$target_tag"
         working-directory: ${{ runner.temp }}/digests
 
   cleanup:

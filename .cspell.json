@@ -1,6 +1,7 @@
 {
   "allowCompoundWords": true,
   "dictionaries": [
+    "bash",
     "docker"
   ],
   "language": "en",
